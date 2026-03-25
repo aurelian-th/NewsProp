@@ -8,12 +8,7 @@ Simulate the propagation of misinformation (fake news vs. real news) within a sy
 2. **AI & NLP Layer:** Embeddings, clustering, and parameter generation (Sentence-BERT, UMAP, DBSCAN).
 3. **Population & Network Layer:** Synthetic agent generation and scale-free graphing (NetworkX).
 4. **Simulation Layer:** Agent-based state transitions using the SEIZ model variant (Mesa).
-
-## 🧑‍💻 Team Roles & Task Distribution
-* **Aurel:** Data Pipeline, Web Scraping (`parse.bot`, `DrissionPage`, `Telethon`).
-* **Gabi:** ML & NLP Pipeline (Sentence-BERT, UMAP, DBSCAN, feature extraction).
-* **Lucian:** Agentic Simulation Engine (Mesa, SEIZ math implementation).
-* **Daniel & Victor:** Network Topology (NetworkX, Barabasi-Albert graph), Visualization (Manim/Matplotlib), Research Paper Formatting.
+5. **Analysis & Visualization Layer:** Graphing results and compiling the research paper (Matplotlib, Manim).
 
 ## 📦 Global Technical Requirements
 * **Language:** Python 3.10+
