@@ -3,5 +3,6 @@ outputs/phase3_network/
 outputs/phase3_network_smoke*/
 outputs/phase45/
 outputs/phase45_*/
+output/
 **/__pycache__/
 pandas_*.log
