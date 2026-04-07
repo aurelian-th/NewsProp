@@ -3,8 +3,15 @@ import time
 import uuid
 import os
 import re
+import sys
 from datetime import datetime
 from DrissionPage import WebPage, ChromiumOptions
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from scraper.common.schema import enforce_final_schema
 
 def scrape_stiri_full_scroll():
     print("🚀 Pornire Scraper V12 - Scroll Infinit & Colectare Masivă")

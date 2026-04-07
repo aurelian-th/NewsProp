@@ -29,6 +29,12 @@ from telethon import TelegramClient
 from telethon.tl.types import Message
 from tqdm import tqdm
 
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from scraper.common.schema import enforce_final_schema
+
 print(f"Python {sys.version}")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -280,7 +286,7 @@ async def main() -> None:
 
     output = []
     for r in final:
-        output.append({
+        raw = {
             "article_id":         r["article_id"],
             "source":             r["source"],
             "is_fake":            r["is_fake"],
@@ -295,7 +301,8 @@ async def main() -> None:
                 "classification": r["classification"],
                 "telegram_url":   r["telegram_url"],
             },
-        })
+        }
+        output.append(enforce_final_schema(raw, default_source=r["source"]))
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
