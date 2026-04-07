@@ -3,8 +3,15 @@ import time
 import uuid
 import os
 import re
+import sys
 from datetime import datetime
 from DrissionPage import WebPage, ChromiumOptions
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from scraper.common.schema import enforce_final_schema
 
 def scrape_stiri_full_scroll():
     print("🚀 Pornire Scraper V12 - Scroll Infinit & Colectare Masivă")
@@ -110,7 +117,7 @@ def scrape_stiri_full_scroll():
                         "top_comments": [],
                         "debunk_context": paragraphs[-1] if ("fals" in headline.lower()) else None
                     }
-                    final_dataset.append(article_obj)
+                    final_dataset.append(enforce_final_schema(article_obj, default_source="stiri.md"))
                     print(f"  ✅ [{item['views']} views] - {headline[:45]}...")
                 
             except Exception as e:
@@ -118,7 +125,7 @@ def scrape_stiri_full_scroll():
 
     # Salvare
     if final_dataset:
-        filename = f"dataset_masiv_{datetime.now().strftime('%H%M')}.json"
+        filename = "stirimd_dataset.json"
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(final_dataset, f, indent=4, ensure_ascii=False)
         print(f"\n🏁 FINALIZAT! Total articole unice: {len(final_dataset)}")
