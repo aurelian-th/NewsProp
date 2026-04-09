@@ -1,0 +1,17 @@
+{
+  "records_total": 1122,
+  "records_kept": 1121,
+  "records_rejected": 1,
+  "records_fake": 859,
+  "records_real": 262,
+  "records_telegram_estimate": 881,
+  "translation_enabled": true,
+  "translation_active": true,
+  "translation_cache_size": 1115,
+  "translation_max_chars": 1400,
+  "translation_retries": 1,
+  "translation_timeout_seconds": 12,
+  "embedding_enabled": true,
+  "high_engagement_threshold": 3337,
+  "min_text_chars": 120
+}

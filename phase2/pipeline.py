@@ -1,14 +1,16 @@
 import argparse
+import hashlib
 import json
 import math
 import random
 import re
 import statistics
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # Optional imports. The script can still run with graceful fallbacks.
@@ -28,12 +30,27 @@ except Exception:
     SentenceTransformer = None
 
 try:
+    import requests  # type: ignore
+except Exception:
+    requests = None
+
+try:
+    from tqdm import tqdm  # type: ignore
+except Exception:
+    tqdm = None
+
+try:
     from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer  # type: ignore
 except Exception:
     SentimentIntensityAnalyzer = None
 
 
 SUPPORTED_TRANSLATION_LANGS = {"ro", "ru", "uk", "fr", "de", "it", "es"}
+DEFAULT_TRANSLATION_MAX_CHARS = 1800
+DEFAULT_TRANSLATION_RETRIES = 1
+DEFAULT_TRANSLATION_TIMEOUT = 15
+
+_REQUEST_TIMEOUT_PATCHED = False
 
 
 @dataclass
@@ -41,6 +58,25 @@ class Paths:
     fake: Path
     real: Path
     telegram: Path
+
+
+def resolve_existing_path(candidates: List[Path]) -> Path:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def progress_iter(items: List[Any], desc: str, fallback_every: int = 50):
+    total = len(items)
+    if tqdm is not None:
+        yield from tqdm(items, total=total, desc=desc)
+        return
+
+    for idx, item in enumerate(items, start=1):
+        if idx == 1 or idx % max(1, fallback_every) == 0 or idx == total:
+            print(f"[{desc}] {idx}/{total}")
+        yield item
 
 
 def load_json_list(path: Path) -> List[Dict[str, Any]]:
@@ -127,35 +163,78 @@ def detect_language(text: str) -> str:
         return "unknown"
 
 
-def build_translator(enable_translation: bool):
+def build_translator(enable_translation: bool, request_timeout: int):
+    global _REQUEST_TIMEOUT_PATCHED
+
     if not enable_translation:
         return None
     if GoogleTranslator is None:
         return None
+
+    if requests is not None and not _REQUEST_TIMEOUT_PATCHED:
+        original_get = requests.get
+
+        def _timeout_get(*args, **kwargs):
+            kwargs.setdefault("timeout", request_timeout)
+            return original_get(*args, **kwargs)
+
+        requests.get = _timeout_get  # type: ignore[assignment]
+        _REQUEST_TIMEOUT_PATCHED = True
+
     try:
         return GoogleTranslator(source="auto", target="en")
     except Exception:
         return None
 
 
-def translate_to_english(text: str, src_lang: str, translator) -> Tuple[str, bool]:
+def _truncate_for_translation(text: str, max_chars: int) -> Tuple[str, bool]:
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text, False
+
+    truncated = text[:max_chars]
+    # Avoid cutting words mid-token when possible.
+    if " " in truncated:
+        truncated = truncated.rsplit(" ", 1)[0]
+    return truncated, True
+
+
+def translate_to_english(
+    text: str,
+    src_lang: str,
+    translator,
+    cache: Dict[str, str],
+    max_chars: int,
+    retries: int,
+) -> Tuple[str, bool, bool]:
     if not text.strip():
-        return "", False
+        return "", False, False
 
     if src_lang in {"en", "unknown"}:
-        return text, False
+        return text, False, False
 
     if src_lang not in SUPPORTED_TRANSLATION_LANGS and not re.search(r"[\u0400-\u04FF]", text):
-        return text, False
+        return text, False, False
 
     if translator is None:
-        return text, False
+        return text, False, False
 
-    try:
-        translated = translator.translate(text)
-        return normalize_whitespace(translated), True
-    except Exception:
-        return text, False
+    text_for_translation, was_truncated = _truncate_for_translation(text, max_chars=max_chars)
+    cache_key = hashlib.sha1(f"{src_lang}|{text_for_translation}".encode("utf-8", errors="ignore")).hexdigest()
+    if cache_key in cache:
+        return cache[cache_key], True, was_truncated
+
+    attempts = max(1, retries + 1)
+    for attempt in range(attempts):
+        try:
+            translated = translator.translate(text_for_translation)
+            translated_norm = normalize_whitespace(translated)
+            cache[cache_key] = translated_norm
+            return translated_norm, True, was_truncated
+        except Exception:
+            if attempt < attempts - 1:
+                time.sleep(0.4 * (attempt + 1))
+
+    return text_for_translation, False, was_truncated
 
 
 def extract_metrics(raw: Dict[str, Any]) -> Dict[str, int]:
@@ -214,6 +293,7 @@ def normalize_record(raw: Dict[str, Any], default_is_fake: Optional[bool]) -> Di
     return {
         "article_id": article_id,
         "source": source,
+        "source_domain": str(raw.get("source_domain") or "").strip() or None,
         "is_fake": is_fake,
         "publication_date": publication_date,
         "headline": headline,
@@ -222,6 +302,28 @@ def normalize_record(raw: Dict[str, Any], default_is_fake: Optional[bool]) -> Di
         "top_comments": top_comments,
         "debunk_context": debunk_context,
     }
+
+
+def quality_flags(record: Dict[str, Any], min_text_chars: int) -> List[str]:
+    flags: List[str] = []
+    source = (record.get("source") or "").strip().lower()
+    source_domain = (record.get("source_domain") or "").strip().lower()
+    headline = (record.get("headline") or "").strip()
+    body = (record.get("body_text") or "").strip()
+    combined = normalize_whitespace(f"{headline}\n\n{body}")
+
+    if not headline:
+        flags.append("missing_headline")
+    if not body:
+        flags.append("missing_body")
+    if len(combined) < min_text_chars:
+        flags.append("short_text")
+    if source in {"unknown", ""}:
+        flags.append("unknown_source")
+    if source_domain in {"unknown", ""}:
+        flags.append("unknown_source_domain")
+
+    return flags
 
 
 def sentence_chunks(text: str) -> List[str]:
@@ -324,23 +426,55 @@ def assign_reference_bin(value_abs: float) -> str:
     return "very_high"
 
 
-def run_pipeline(paths: Paths, output_dir: Path, enable_translation: bool) -> None:
+def run_pipeline(
+    paths: Paths,
+    output_dir: Path,
+    enable_translation: bool,
+    min_text_chars: int,
+    translation_max_chars: int,
+    translation_retries: int,
+    translation_timeout: int,
+    enable_embeddings: bool,
+) -> None:
     if SentimentIntensityAnalyzer is None:
         raise RuntimeError(
             "Missing dependency: vaderSentiment. Install with: pip install -r phase2/requirements.txt"
         )
 
     analyzer = SentimentIntensityAnalyzer()
-    translator = build_translator(enable_translation=enable_translation)
+    translator = build_translator(enable_translation=enable_translation, request_timeout=translation_timeout)
+    translation_cache: Dict[str, str] = {}
 
-    fake_rows = [normalize_record(x, default_is_fake=True) for x in load_json_list(paths.fake)]
-    real_rows = [normalize_record(x, default_is_fake=False) for x in load_json_list(paths.real)]
-    tg_rows = [normalize_record(x, default_is_fake=None) for x in load_json_list(paths.telegram)]
+    t0 = time.perf_counter()
+    print("[Phase2] Loading datasets...")
 
-    records = fake_rows + real_rows + tg_rows
+    fake_rows_raw = [normalize_record(x, default_is_fake=True) for x in load_json_list(paths.fake)]
+    real_rows_raw = [normalize_record(x, default_is_fake=False) for x in load_json_list(paths.real)]
+    tg_rows_raw = [normalize_record(x, default_is_fake=None) for x in load_json_list(paths.telegram)]
+
+    all_rows = fake_rows_raw + real_rows_raw + tg_rows_raw
+
+    records: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, Any]] = []
+    quality_counter: Dict[str, int] = {}
+
+    print("[Phase2] Running quality filtering...")
+    for row in progress_iter(all_rows, desc="Quality"):
+        flags = quality_flags(row, min_text_chars=min_text_chars)
+        if flags:
+            for flag in flags:
+                quality_counter[flag] = quality_counter.get(flag, 0) + 1
+        if any(flag in {"missing_body", "short_text"} for flag in flags):
+            rejected.append({"article_id": row["article_id"], "flags": flags, "source": row["source"]})
+            continue
+        records.append(row)
+
+    fake_rows = [r for r in records if r["is_fake"] is True]
+    real_rows = [r for r in records if r["is_fake"] is False]
+    tg_rows = [r for r in records if r["source"] not in {"stiri.md"} and r["is_fake"] in {True, False}]
 
     model = None
-    if SentenceTransformer is not None:
+    if enable_embeddings and SentenceTransformer is not None:
         try:
             model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
         except Exception:
@@ -348,10 +482,18 @@ def run_pipeline(paths: Paths, output_dir: Path, enable_translation: bool) -> No
 
     texts_for_embedding: List[str] = []
 
-    for rec in records:
+    print("[Phase2] Running language detection, translation, sentiment, and feature extraction...")
+    for rec in progress_iter(records, desc="NLP"):
         combined = normalize_whitespace(f"{rec['headline']}\n\n{rec['body_text']}")
         lang = detect_language(combined)
-        text_en, translated = translate_to_english(combined, lang, translator)
+        text_en, translated, translation_truncated = translate_to_english(
+            combined,
+            lang,
+            translator,
+            cache=translation_cache,
+            max_chars=translation_max_chars,
+            retries=translation_retries,
+        )
 
         sentiment = compute_emotion_features(analyzer, text_en)
 
@@ -366,6 +508,7 @@ def run_pipeline(paths: Paths, output_dir: Path, enable_translation: bool) -> No
         rec["language_detected"] = lang
         rec["text_en"] = text_en
         rec["translation_applied"] = translated
+        rec["translation_truncated"] = translation_truncated
         rec["sentiment"] = sentiment
         rec["impact_score"] = sentiment["emotional_score"]
         rec["reference_bin"] = assign_reference_bin(abs(sentiment["emotional_score"]))
@@ -374,7 +517,8 @@ def run_pipeline(paths: Paths, output_dir: Path, enable_translation: bool) -> No
         texts_for_embedding.append(text_en)
 
     if model is not None:
-        vectors = model.encode(texts_for_embedding, normalize_embeddings=True, show_progress_bar=False)
+        print("[Phase2] Encoding embeddings (this can take several minutes on CPU)...")
+        vectors = model.encode(texts_for_embedding, normalize_embeddings=True, show_progress_bar=True)
         for rec, vec in zip(records, vectors):
             rec["embedding"] = [round(float(v), 8) for v in vec.tolist()]
     else:
@@ -441,16 +585,24 @@ def run_pipeline(paths: Paths, output_dir: Path, enable_translation: bool) -> No
     }
 
     summary = {
-        "records_total": len(records),
-        "records_fake": len(fake_rows),
-        "records_real": len(real_rows),
-        "records_telegram": len(tg_rows),
+        "records_total": len(all_rows),
+        "records_kept": len(records),
+        "records_rejected": len(rejected),
+        "records_fake": len([r for r in records if r["is_fake"] is True]),
+        "records_real": len([r for r in records if r["is_fake"] is False]),
+        "records_telegram_estimate": len(tg_rows),
         "translation_enabled": enable_translation,
         "translation_active": translator is not None,
+        "translation_cache_size": len(translation_cache),
+        "translation_max_chars": translation_max_chars,
+        "translation_retries": translation_retries,
+        "translation_timeout_seconds": translation_timeout,
         "embedding_enabled": model is not None,
         "high_engagement_threshold": threshold,
+        "min_text_chars": min_text_chars,
     }
 
+    print("[Phase2] Writing output artifacts...")
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts = output_dir / "artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -479,9 +631,42 @@ def run_pipeline(paths: Paths, output_dir: Path, enable_translation: bool) -> No
     with (artifacts / "comparisons.json").open("w", encoding="utf-8") as f:
         json.dump(comparisons, f, ensure_ascii=False, indent=2)
 
+    with (artifacts / "data_quality.json").open("w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "counters": dict(sorted(quality_counter.items())),
+                "rejected_examples": rejected[:200],
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    elapsed = round(time.perf_counter() - t0, 2)
+    print(f"[Phase2] Done in {elapsed}s. Kept {len(records)} records, rejected {len(rejected)}.")
+
 
 def parse_args() -> argparse.Namespace:
     root = Path(__file__).resolve().parents[1]
+    default_fake = resolve_existing_path(
+        [
+            root / "scraper" / "fake" / "stopfals_final_dataset.json",
+            root / "stopfals_final_dataset.json",
+        ]
+    )
+    default_real = resolve_existing_path(
+        [
+            root / "scraper" / "real" / "stirimd_dataset.json",
+            root / "stirimd_dataset.json",
+        ]
+    )
+    default_telegram = resolve_existing_path(
+        [
+            root / "scraper" / "telegram" / "moldova_news_50.json",
+            root / "moldova_news_50.json",
+        ]
+    )
+
     parser = argparse.ArgumentParser(
         description="Phase 2 pipeline: normalize datasets, translate to English, score emotion with VADER, and export CI/calibration artifacts."
     )
@@ -489,19 +674,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fake",
         type=Path,
-        default=root / "scraper" / "fake" / "stopfals_final_dataset.json",
+        default=default_fake,
         help="Path to fake-news JSON list.",
     )
     parser.add_argument(
         "--real",
         type=Path,
-        default=root / "scraper" / "real" / "stirimd_dataset.json",
+        default=default_real,
         help="Path to real-news JSON list.",
     )
     parser.add_argument(
         "--telegram",
         type=Path,
-        default=root / "scraper" / "telegram" / "moldova_news_50.json",
+        default=default_telegram,
         help="Path to Telegram JSON list.",
     )
     parser.add_argument(
@@ -515,6 +700,35 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip translation and process text in original language.",
     )
+    parser.add_argument(
+        "--translation-max-chars",
+        type=int,
+        default=DEFAULT_TRANSLATION_MAX_CHARS,
+        help="Max characters per record sent to online translator to avoid long/hanging requests.",
+    )
+    parser.add_argument(
+        "--translation-retries",
+        type=int,
+        default=DEFAULT_TRANSLATION_RETRIES,
+        help="Retry count for failed translation requests.",
+    )
+    parser.add_argument(
+        "--translation-timeout",
+        type=int,
+        default=DEFAULT_TRANSLATION_TIMEOUT,
+        help="HTTP timeout in seconds for translator requests.",
+    )
+    parser.add_argument(
+        "--disable-embeddings",
+        action="store_true",
+        help="Skip sentence-transformer embeddings for faster debug runs.",
+    )
+    parser.add_argument(
+        "--min-text-chars",
+        type=int,
+        default=120,
+        help="Minimum combined headline+body chars required to keep a record in Phase 2.",
+    )
 
     return parser.parse_args()
 
@@ -527,6 +741,11 @@ def main() -> None:
         paths=paths,
         output_dir=args.output_dir,
         enable_translation=not args.disable_translation,
+        min_text_chars=max(0, int(args.min_text_chars)),
+        translation_max_chars=max(200, int(args.translation_max_chars)),
+        translation_retries=max(0, int(args.translation_retries)),
+        translation_timeout=max(5, int(args.translation_timeout)),
+        enable_embeddings=not args.disable_embeddings,
     )
 
 

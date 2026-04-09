@@ -28,6 +28,7 @@ Analysis artifacts:
 - `phase2/outputs/artifacts/confidence_intervals.json`
 - `phase2/outputs/artifacts/empirical_calibration.json`
 - `phase2/outputs/artifacts/comparisons.json`
+- `phase2/outputs/artifacts/data_quality.json`
 
 ## Normalized schema
 
@@ -116,7 +117,9 @@ Optional flags:
 
 ```bash
 python phase2/pipeline.py --disable-translation
+python phase2/pipeline.py --disable-embeddings
 python phase2/pipeline.py --fake <path> --real <path> --telegram <path> --output-dir <path>
+python phase2/pipeline.py --translation-max-chars 1400 --translation-timeout 12 --translation-retries 1
 ```
 
 ## Notes
@@ -124,3 +127,8 @@ python phase2/pipeline.py --fake <path> --real <path> --telegram <path> --output
 - Translation uses `deep-translator` + Google Translate backend when available.
 - If translation package is missing, pipeline keeps original text and still computes scores.
 - Telegram records with uncertain labels keep their `is_fake` value from source.
+- Records with missing body or very short text are automatically filtered before scoring.
+- You can tune filtering with `--min-text-chars` (default: `120`).
+- Translation requests are now guarded with timeout + retries and per-record text truncation to avoid long hangs.
+- Pipeline now prints stage logs and progress bars (`Quality`, `NLP`, embeddings encode).
+- For quick debugging, use `--disable-embeddings` to skip model download/inference overhead.

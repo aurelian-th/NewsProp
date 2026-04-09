@@ -1,0 +1,27 @@
+{
+  "very_low": {
+    "n": 91,
+    "high_engagement_probability": 0.307692,
+    "mean_impact_score": -0.002493
+  },
+  "low": {
+    "n": 104,
+    "high_engagement_probability": 0.211538,
+    "mean_impact_score": -0.034704
+  },
+  "medium": {
+    "n": 118,
+    "high_engagement_probability": 0.254237,
+    "mean_impact_score": -0.084588
+  },
+  "high": {
+    "n": 215,
+    "high_engagement_probability": 0.311628,
+    "mean_impact_score": -0.054453
+  },
+  "very_high": {
+    "n": 593,
+    "high_engagement_probability": 0.22597,
+    "mean_impact_score": -0.130305
+  }
+}
