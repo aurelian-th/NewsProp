@@ -1,9 +1,13 @@
 old/
 stuff.md
 outputs/phase3_network/
+outputs/phase3_network_*/
 outputs/phase3_network_smoke*/
 outputs/phase45/
 outputs/phase45_*/
 output/
 **/__pycache__/
 pandas_*.log
+phase2/outputs/smoke/
+phase2/outputs/script_smoke/
+phase2/outputs/autonomous/
