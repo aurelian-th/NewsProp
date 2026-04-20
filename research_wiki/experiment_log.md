@@ -203,3 +203,16 @@
   - output: `paper/build/NewsProp.pdf`
   - status: success with residual layout warnings only
   - notable result: Tectonic now compiles the paper end to end on this machine
+
+### Recovery Branch Checkpoint
+- Timestamp:
+  - `2026-04-20 15:20 Europe/Chisinau`
+- Commit:
+  - `0cb6fb0` - `Provision Tectonic and finalize paper build`
+- Branch:
+  - `autonomous/newsprop-recovery`
+- Verification:
+  - `git push -u origin autonomous/newsprop-recovery`
+  - remote push succeeded and created the branch on GitHub
+- Purpose:
+  - preserve the validated paper build, the local Tectonic provisioning path, and the state/wiki updates in a remote checkpoint before starting the next experiment slice

@@ -81,12 +81,13 @@ Deliver a fully functional Moldova-focused misinformation propagation simulator 
 - Fixed the build wrapper path-selection bug so it resolves the full executable path instead of the first character of the path string.
 - Updated the TeX manuscript to use TeX-safe bibliography entries and explicit accent commands for Romanian characters.
 - Verified `scripts/build_paper.ps1` now compiles `paper/tex/NewsProp.tex` successfully and emits `paper/build/NewsProp.pdf`.
+- Committed the recovery checkpoint as `0cb6fb0` and pushed it to `origin/autonomous/newsprop-recovery`.
 
 ## Current Intent
-Checkpoint the verified manuscript and build wrapper on the recovery branch, then continue with paper-grade refinement or the next experiment slice.
+Begin the next paper-grade experiment slice: a translation-enabled Phase 2 run on the refreshed Telegram corpus, then compare it against the current translation-disabled baseline.
 
 ## Next Intent
-Commit the Tectonic-provisioning and manuscript fixes, then push the recovery branch so the validated paper build is preserved remotely.
+Run the translation-enabled Phase 2 pipeline on the expanded Telegram dataset and record the differential effects in the research wiki.
 
 ## Risks and Pivots
 - Python 3.14 compatibility remains a risk for less common scientific dependencies, even though the current stack installed successfully.
