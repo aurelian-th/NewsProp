@@ -12,6 +12,8 @@ phase2/outputs/smoke/
 phase2/outputs/script_smoke/
 phase2/outputs/autonomous/
 phase2/outputs/telegram_refresh/
+phase2/outputs/telegram_refresh_translation_smoke/
+phase2/outputs/telegram_refresh_sample_200_no_translation/
 outputs/phase45_telegram_refresh/
 paper/build/
 tools/tectonic/

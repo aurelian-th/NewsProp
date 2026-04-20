@@ -82,12 +82,17 @@ Deliver a fully functional Moldova-focused misinformation propagation simulator 
 - Updated the TeX manuscript to use TeX-safe bibliography entries and explicit accent commands for Romanian characters.
 - Verified `scripts/build_paper.ps1` now compiles `paper/tex/NewsProp.tex` successfully and emits `paper/build/NewsProp.pdf`.
 - Committed the recovery checkpoint as `0cb6fb0` and pushed it to `origin/autonomous/newsprop-recovery`.
+- Attempted a translation-enabled Phase 2 run on the refreshed Telegram corpus, but the job timed out after 20 minutes without producing output artifacts.
+- Ran a translation-enabled Phase 2 smoke slice on a 200-record sampled refreshed Telegram corpus and completed successfully after 27 minutes.
+- Ran the matching translation-disabled Phase 2 pass on the same sampled corpus and completed successfully in 23 seconds.
+- Ran Phase 4/5 on the translation-enabled sample and the matching translation-disabled sample using the same 200-node smoke network.
+- Updated the paper draft with the translation comparison and rebuilt the PDF successfully.
 
 ## Current Intent
-Begin the next paper-grade experiment slice: a translation-enabled Phase 2 run on the refreshed Telegram corpus, then compare it against the current translation-disabled baseline.
+Checkpoint the translation-comparison update on the recovery branch, then decide whether a larger translation slice is worth the runtime cost.
 
 ## Next Intent
-Run the translation-enabled Phase 2 pipeline on the expanded Telegram dataset and record the differential effects in the research wiki.
+Either expand the translation slice slightly for stronger evidence or keep the current sample-level diagnostic and move to final paper tightening.
 
 ## Risks and Pivots
 - Python 3.14 compatibility remains a risk for less common scientific dependencies, even though the current stack installed successfully.
@@ -101,6 +106,8 @@ Run the translation-enabled Phase 2 pipeline on the expanded Telegram dataset an
 - The old Git index-lock blocker was bypassed by moving into a fresh writable clone, so commit/push is available again.
 - The current operational blocker set is cleared.
 - Next meaningful risk is scientific rather than operational: the paper still needs a broader experiment matrix beyond the current translation-disabled baseline path.
+- The full translation-enabled Telegram run exceeded the wall-clock budget, so the next step is to use the smaller sampled corpus for the downstream simulation comparison.
+- The sampled translation comparison completed successfully and now needs to be integrated into the paper narrative.
 
 ## Latest Measured Results
 - Phase 2 smoke pipeline:

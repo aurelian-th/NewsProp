@@ -63,6 +63,37 @@ The paired-analysis refresh has now been completed successfully. The following a
   - `0.7` for final infected
   - `1.0` non-negative share for tick delay
 
+## Translation Effect on Sampled Telegram Slice
+- sample: deterministic 200-record subset from the refreshed Telegram corpus
+- translation-enabled global mean sentiment: `-0.0782443396226415`
+- translation-disabled global mean sentiment: `0.6278442610062893`
+- delta between translation-enabled and translation-disabled global means: `-0.7060886006289308`
+- interpretation:
+  - translation changes the Phase 2 calibration substantially on this slice, so any paper claim about sentiment or downstream diffusion should explicitly name the translation setting used
+  - the translation-enabled path is too slow for the full corpus in one interactive run, so the sample should be treated as a diagnostic comparison rather than a full replacement for the corpus-wide baseline
+
+## Phase 4/5 Sample Simulation Comparison
+- simulation setting:
+  - `2` runs
+  - `30` ticks
+  - `200` agents
+  - fixed Phase 3 smoke payload
+- translation-enabled sample:
+  - peak reduction: `2.6881720430107525%`
+  - infected AUC reduction: `4.066634002939735%`
+  - paired peak infected delta mean: `5.0`
+  - paired infected AUC delta mean: `207.5`
+  - paired tick delay mean: `0.0`
+- translation-disabled sample:
+  - peak reduction: `1.6483516483516483%`
+  - infected AUC reduction: `2.9811924769907963%`
+  - paired peak infected delta mean: `3.0`
+  - paired infected AUC delta mean: `149.0`
+  - paired tick delay mean: `0.5`
+- interpretation:
+  - translation-enabled preprocessing slightly strengthens the measured intervention effect on this smoke slice, but the dominant difference is still the sentiment calibration shift in Phase 2
+  - because the two Phase 2 runs selected different dominant articles, the comparison should be described as a pipeline sensitivity test rather than a pure ablation of translation alone
+
 ## Paper Integration Targets
 - Abstract: one sentence on average reduction
 - Results: table with means and bootstrap intervals

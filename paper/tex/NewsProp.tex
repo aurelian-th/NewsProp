@@ -218,6 +218,8 @@ The bootstrap intervals strengthen this claim by showing that the reduction is n
 
 The Telegram refresh sensitivity result adds an important caveat: broader source coverage does not necessarily amplify the effect size. Instead, it can reveal that the apparent strength of the intervention depends on which specific news item the corpus elevates as the most transmissible example.
 
+The sampled translation comparison adds a second caveat. On a deterministic 200-record subset of the refreshed Telegram corpus, translation changed the Phase 2 sentiment calibration sharply: the translation-enabled run produced a global mean sentiment of -0.0782, while the translation-disabled run produced 0.6278. When both Phase 2 outputs were fed into the same 200-node smoke network, the translation-enabled path selected a different dominant fake-news article and slightly increased the intervention effect, with peak reduction rising from 1.65\% to 2.69\% and infected AUC reduction rising from 2.98\% to 4.07\%. This makes translation a scientifically important preprocessing choice, but it also means the paper should describe the setting explicitly rather than treat it as a hidden implementation detail.
+
 \section{Limitations}
 The present draft still has important limitations:
 

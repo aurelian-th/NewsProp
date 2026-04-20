@@ -216,3 +216,97 @@
   - remote push succeeded and created the branch on GitHub
 - Purpose:
   - preserve the validated paper build, the local Tectonic provisioning path, and the state/wiki updates in a remote checkpoint before starting the next experiment slice
+
+### Translation-Enabled Phase 2 Full-Corpus Timeout
+- Timestamp:
+  - `2026-04-20 15:20 Europe/Chisinau`
+- Command:
+  - `D:\projects\newsprop\NewsProp\.venv\Scripts\python.exe phase2\pipeline.py --telegram scraper\telegram\moldova_news_telegram.json --output-dir phase2\outputs\telegram_refresh_translation --disable-embeddings`
+- Input datasets:
+  - refreshed Telegram scrape `scraper/telegram/moldova_news_telegram.json`
+  - default fake-news and real-news inputs resolved by Phase 2
+- Output directory:
+  - `phase2/outputs/telegram_refresh_translation`
+- Status:
+  - failure by wall-clock timeout after 20 minutes
+- Suspected cause:
+  - translation requests across the full 2,700-record Telegram corpus are too slow for a single interactive run
+- Recovery:
+  - pivot to a smaller sampled Telegram smoke slice from the same refreshed corpus so translation-enabled behavior can still be measured within the runtime budget
+- Final status:
+  - no output artifacts were produced before timeout
+
+### Translation-Enabled vs Disabled Phase 2 Sample Comparison
+- Timestamp:
+  - `2026-04-20 16:00 Europe/Chisinau`
+- Sample:
+  - deterministic 200-record subset from `scraper/telegram/moldova_news_telegram.json`
+- Translation-enabled run:
+  - command: `D:\projects\newsprop\NewsProp\.venv\Scripts\python.exe phase2\pipeline.py --telegram phase2\inputs\telegram_refresh_sample_200.json --output-dir phase2\outputs\telegram_refresh_translation_smoke --disable-embeddings`
+  - runtime: `1649.26s`
+  - records kept: `1272`
+  - records rejected: `0`
+  - translation enabled: `true`
+  - global mean sentiment: `-0.0782443396226415`
+  - fake mean sentiment: `-0.17162998885172798`
+  - real mean sentiment: `0.14513413333333333`
+- Translation-disabled run:
+  - command: `D:\projects\newsprop\NewsProp\.venv\Scripts\python.exe phase2\pipeline.py --telegram phase2\inputs\telegram_refresh_sample_200.json --output-dir phase2\outputs\telegram_refresh_sample_200_no_translation --disable-translation --disable-embeddings`
+  - runtime: `23.11s`
+  - records kept: `1272`
+  - records rejected: `0`
+  - translation enabled: `false`
+  - global mean sentiment: `0.6278442610062893`
+  - fake mean sentiment: `0.6496999999999999`
+  - real mean sentiment: `0.5755653333333333`
+- Immediate interpretation:
+  - enabling translation on the sample materially shifts the sentiment calibration downward and flips the fake/real ordering seen in the disabled run
+  - the translation-enabled pipeline is scientifically interesting but substantially slower, so the next step should feed the sample outputs into Phase 4/5 rather than expand the translation run immediately
+
+### Phase 4/5 on Sampled Translation Variants
+- Timestamp:
+  - `2026-04-20 16:30 Europe/Chisinau`
+- Simulation settings:
+  - `2` runs
+  - `30` ticks
+  - `200` agents
+  - fixed Phase 3 payload: `outputs/phase3_network_smoke/mesa_payload_phase3.json`
+- Translation-enabled sample output:
+  - output directory: `outputs/phase45_translation_sample_smoke`
+  - selected news article: `180906`
+  - selected news source: `Facebook`
+  - impact score: `-0.9682`
+  - baseline peak infected: `186.0`
+  - prebunked peak infected: `181.0`
+  - peak reduction: `2.6881720430107525%`
+  - infected AUC reduction: `4.066634002939735%`
+  - paired peak infected delta mean: `5.0`
+  - paired infected AUC delta mean: `207.5`
+  - paired tick delay mean: `0.0`
+- Translation-disabled sample output:
+  - output directory: `outputs/phase45_sample_200_no_translation`
+  - selected news article: `181039`
+  - selected news source: `Facebook`
+  - impact score: `0.9965`
+  - baseline peak infected: `182.0`
+  - prebunked peak infected: `179.0`
+  - peak reduction: `1.6483516483516483%`
+  - infected AUC reduction: `2.9811924769907963%`
+  - paired peak infected delta mean: `3.0`
+  - paired infected AUC delta mean: `149.0`
+  - paired tick delay mean: `0.5`
+- Immediate interpretation:
+  - translation changes which article becomes the dominant fake-news driver and shifts the downstream intervention effect by roughly one percentage point on this smoke slice
+  - the no-translation run is faster, but the translation-enabled run still finishes on the sampled corpus and therefore remains available for paper-grade comparison if framed as a sample-level diagnostic
+
+### Manuscript Update After Translation Comparison
+- Timestamp:
+  - `2026-04-20 16:40 Europe/Chisinau`
+- Change:
+  - updated `paper/tex/NewsProp.tex` and `paper/NewsProp_Research_Paper.md` to describe the sampled translation comparison
+- Verification:
+  - rebuilt the PDF with `scripts/build_paper.ps1`
+  - output: `paper/build/NewsProp.pdf`
+  - status: success
+- Purpose:
+  - keep the manuscript synchronized with the newest evidence chain from Phase 2 through Phase 4/5
