@@ -51,7 +51,7 @@ SESSION_NAME = "moldova_scraper_session"
 POSTS_PER_CHANNEL = 30
 TARGET_FAKE  = 25
 TARGET_TRUE  = 25
-OUTPUT_FILE  = "moldova_news_50.json"
+OUTPUT_FILE  = "moldova_news_telegram.json"
 
 # ---------------------------------------------------------------------------
 # Verified channel list  (checked March 2026)

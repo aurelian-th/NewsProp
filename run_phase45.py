@@ -9,6 +9,7 @@ try:
         SimulationConfig,
         compute_news_features,
         load_and_normalize_datasets,
+        load_phase2_normalized_dataset,
         plot_average_curves,
         run_phase45_pipeline,
         save_network_snapshot,
@@ -24,6 +25,7 @@ except ModuleNotFoundError:
         SimulationConfig,
         compute_news_features,
         load_and_normalize_datasets,
+        load_phase2_normalized_dataset,
         plot_average_curves,
         run_phase45_pipeline,
         save_network_snapshot,
@@ -35,6 +37,17 @@ def parse_args() -> argparse.Namespace:
         description="Run NewsProp Phase 4/5 simulation and analysis pipeline.",
     )
 
+    parser.add_argument(
+        "--phase2-normalized",
+        type=Path,
+        default=Path("phase2/outputs/normalized_with_phase2.json"),
+        help="Optional Phase 2 normalized dataset JSON. Preferred when available.",
+    )
+    parser.add_argument(
+        "--ignore-phase2-normalized",
+        action="store_true",
+        help="Force simulation to rebuild features from raw scraped datasets.",
+    )
     parser.add_argument(
         "--fake",
         type=Path,
@@ -50,7 +63,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--telegram",
         type=Path,
-        default=Path("scraper/telegram/moldova_news_50.json"),
+        default=Path("scraper/telegram/moldova_news_telegram.json"),
         help="Path to telegram dataset JSON.",
     )
     parser.add_argument(
@@ -97,11 +110,16 @@ def main() -> None:
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    normalized_news = load_and_normalize_datasets(
-        fake_path=args.fake,
-        real_path=args.real,
-        telegram_path=args.telegram,
-    )
+    if not args.ignore_phase2_normalized and args.phase2_normalized.exists():
+        normalized_news = load_phase2_normalized_dataset(args.phase2_normalized)
+        print(f"Loaded Phase 2 normalized dataset: {args.phase2_normalized}")
+    else:
+        normalized_news = load_and_normalize_datasets(
+            fake_path=args.fake,
+            real_path=args.real,
+            telegram_path=args.telegram,
+        )
+        print("Loaded raw scraped datasets for feature construction.")
     featured_news = compute_news_features(normalized_news)
 
     phase3_payload_path = None
@@ -122,6 +140,28 @@ def main() -> None:
 
     featured_news.to_csv(output_dir / "processed_news_clusters.csv", index=False)
     results["timeline"].to_csv(output_dir / "timeline.csv", index=False)
+    results["run_metrics"].to_csv(output_dir / "run_metrics.csv", index=False)
+    paired_comparison = (
+        results["run_metrics"]
+        .pivot(index="run", columns="scenario", values=["peak_infected", "infected_auc", "final_infected", "tick_of_peak"])
+        .sort_index()
+    )
+    if not paired_comparison.empty:
+        paired_flat = paired_comparison.copy()
+        paired_flat.columns = ["__".join(map(str, column)) for column in paired_flat.columns.to_flat_index()]
+        paired_flat["peak_infected_delta"] = (
+            paired_flat["peak_infected__baseline"] - paired_flat["peak_infected__prebunk_hubs"]
+        )
+        paired_flat["infected_auc_delta"] = (
+            paired_flat["infected_auc__baseline"] - paired_flat["infected_auc__prebunk_hubs"]
+        )
+        paired_flat["final_infected_delta"] = (
+            paired_flat["final_infected__baseline"] - paired_flat["final_infected__prebunk_hubs"]
+        )
+        paired_flat["tick_of_peak_delay"] = (
+            paired_flat["tick_of_peak__prebunk_hubs"] - paired_flat["tick_of_peak__baseline"]
+        )
+        paired_flat.reset_index().to_csv(output_dir / "paired_run_comparison.csv", index=False)
     results["average_timeline"].to_csv(output_dir / "average_timeline.csv", index=False)
     results["hub_nodes"].to_csv(output_dir / "hub_nodes.csv", index=False)
 

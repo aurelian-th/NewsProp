@@ -166,6 +166,16 @@ def _safe_list(value: Any) -> List[Any]:
     return []
 
 
+def _load_json_records(path: Path) -> List[Dict[str, Any]]:
+    with Path(path).open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+
+    if not isinstance(payload, list):
+        return []
+
+    return [row for row in payload if isinstance(row, dict)]
+
+
 def _normalize_metrics(raw: Dict[str, Any]) -> Dict[str, float]:
     shares = _safe_float(raw.get("shares", raw.get("forwards_or_shares", 0.0)))
     likes = _safe_float(raw.get("likes", 0.0))
@@ -230,15 +240,8 @@ def load_and_normalize_datasets(
 
     records: List[Dict[str, Any]] = []
     for path, source_type in datasets:
-        with path.open("r", encoding="utf-8") as file:
-            payload = json.load(file)
-
-        if not isinstance(payload, list):
-            continue
-
-        for raw in payload:
-            if isinstance(raw, dict):
-                records.append(_normalize_record(raw, source_type))
+        for raw in _load_json_records(path):
+            records.append(_normalize_record(raw, source_type))
 
     frame = pd.DataFrame(records)
     if frame.empty:
@@ -249,6 +252,89 @@ def load_and_normalize_datasets(
     frame["shares"] = frame["shares"].clip(lower=0)
     frame["comments"] = frame["comments"].clip(lower=0)
 
+    return frame
+
+
+def _infer_source_type_from_phase2(raw: Dict[str, Any]) -> str:
+    source = str(raw.get("source") or raw.get("source_domain") or "").lower()
+
+    if "telegram" in source:
+        return "telegram"
+    if source in {"stiri.md", "protv", "jurnal.md", "protv.md"}:
+        return "real"
+    if bool(raw.get("is_fake", False)):
+        return "fake"
+    return "real"
+
+
+def load_phase2_normalized_dataset(phase2_path: Path) -> pd.DataFrame:
+    records: List[Dict[str, Any]] = []
+
+    for raw in _load_json_records(phase2_path):
+        metrics = _normalize_metrics(
+            raw.get("engagement_metrics")
+            if isinstance(raw.get("engagement_metrics"), dict)
+            else raw.get("metrics")
+            if isinstance(raw.get("metrics"), dict)
+            else {}
+        )
+        sentiment = raw.get("sentiment") if isinstance(raw.get("sentiment"), dict) else {}
+        headline = str(raw.get("headline", "") or "").strip()
+        body_text = str(raw.get("body_text", "") or "").strip()
+        text_en = str(raw.get("text_en", "") or "").strip()
+        impact_score = float(
+            np.clip(
+                _safe_float(raw.get("impact_score"), _safe_float(sentiment.get("emotional_score"), 0.0)),
+                -1.0,
+                1.0,
+            )
+        )
+        emotional_intensity = float(
+            np.clip(
+                _safe_float(sentiment.get("emotional_intensity"), abs(impact_score)),
+                0.0,
+                1.0,
+            )
+        )
+        source_type = _infer_source_type_from_phase2(raw)
+
+        records.append(
+            {
+                "article_id": str(raw.get("article_id") or ""),
+                "source": str(raw.get("source") or raw.get("source_domain") or "unknown"),
+                "source_type": source_type,
+                "is_fake": bool(raw.get("is_fake", False)),
+                "publication_date": raw.get("publication_date"),
+                "headline": headline,
+                "body_text": body_text,
+                "combined_text": text_en or f"{headline} {body_text}".strip(),
+                "views": metrics["views"],
+                "likes": metrics["likes"],
+                "shares": metrics["shares"],
+                "comments": metrics["comments"],
+                "top_comments": _safe_list(raw.get("top_comments")),
+                "top_comment_count": float(len(_safe_list(raw.get("top_comments")))),
+                "has_debunk_context": 1.0 if raw.get("debunk_context") else 0.0,
+                "inferred_sources_count": float(len(_safe_list(raw.get("inferred_sources")))),
+                "engagement_total": _safe_float(raw.get("engagement_total"), 0.0),
+                "impact_score": impact_score,
+                "phase2_emotional_intensity": emotional_intensity,
+                "phase2_language": str(raw.get("language_detected") or "unknown"),
+                "phase2_reference_bin": str(raw.get("reference_bin") or ""),
+                "phase2_translation_applied": bool(raw.get("translation_applied", False)),
+                "feature_source": "phase2_normalized",
+            }
+        )
+
+    frame = pd.DataFrame(records)
+    if frame.empty:
+        raise ValueError(f"No valid Phase 2 records found in {phase2_path}.")
+
+    frame["views"] = frame["views"].clip(lower=0)
+    frame["likes"] = frame["likes"].clip(lower=0)
+    frame["shares"] = frame["shares"].clip(lower=0)
+    frame["comments"] = frame["comments"].clip(lower=0)
+    frame["engagement_total"] = frame["engagement_total"].clip(lower=0)
     return frame
 
 
@@ -301,31 +387,66 @@ def compute_news_features(news_df: pd.DataFrame) -> pd.DataFrame:
     comment_density = comments / np.sqrt(adjusted_views)
     share_velocity = shares / np.sqrt(adjusted_views)
     comment_vs_like = comments / np.maximum(likes + 1.0, 1.0)
+    engagement_total = frame.get("engagement_total")
+    if engagement_total is None:
+        engagement_total_values = views + likes + shares + comments
+    else:
+        engagement_total_values = np.maximum(frame["engagement_total"].to_numpy(dtype=float), 0.0)
+    engagement_signal = np.log1p(engagement_total_values)
+
+    impact_magnitude = np.abs(
+        np.clip(
+            frame["impact_score"].to_numpy(dtype=float),
+            -1.0,
+            1.0,
+        )
+    ) if "impact_score" in frame.columns else None
 
     raw_controversy = (
         0.35 * comment_density
         + 0.30 * share_velocity
         + 0.20 * comment_vs_like
         + 0.15 * (top_comment_count / np.maximum(top_comment_count + 3.0, 1.0))
-    ) + 0.12 * frame["has_debunk_context"].to_numpy(dtype=float)
+    ) + 0.12 * frame["has_debunk_context"].to_numpy(dtype=float) + 0.08 * engagement_signal
 
-    raw_emotional = np.array(
-        [
-            _estimate_emotional_intensity(text=combined, headline=headline)
-            for combined, headline in zip(frame["combined_text"], frame["headline"])
-        ],
-        dtype=float,
-    )
+    if impact_magnitude is not None:
+        raw_controversy = raw_controversy + 0.18 * impact_magnitude
+
+    if "phase2_emotional_intensity" in frame.columns:
+        raw_emotional = np.clip(frame["phase2_emotional_intensity"].to_numpy(dtype=float), 0.0, 1.0)
+        frame["feature_source"] = "phase2_normalized"
+    else:
+        raw_emotional = np.array(
+            [
+                _estimate_emotional_intensity(text=combined, headline=headline)
+                for combined, headline in zip(frame["combined_text"], frame["headline"])
+            ],
+            dtype=float,
+        )
+        frame["feature_source"] = frame.get("feature_source", "raw_heuristic")
 
     raw_matrix = np.column_stack([raw_controversy, raw_emotional])
     scaler = MinMaxScaler(feature_range=(0.0, 1.0))
     scaled = scaler.fit_transform(raw_matrix)
 
     frame["controversy_score"] = scaled[:, 0]
-    frame["emotional_intensity"] = scaled[:, 1]
+    if "phase2_emotional_intensity" in frame.columns:
+        frame["emotional_intensity"] = raw_emotional
+    else:
+        frame["emotional_intensity"] = scaled[:, 1]
+
+    if "impact_score" not in frame.columns:
+        frame["impact_score"] = np.where(
+            frame["is_fake"].to_numpy(dtype=bool),
+            frame["emotional_intensity"],
+            -0.5 * frame["emotional_intensity"],
+        )
+
+    if impact_magnitude is None:
+        impact_magnitude = np.abs(np.clip(frame["impact_score"].to_numpy(dtype=float), -1.0, 1.0))
 
     transmission_base = 0.08 + 0.72 * (
-        0.60 * frame["controversy_score"] + 0.40 * frame["emotional_intensity"]
+        0.50 * frame["controversy_score"] + 0.30 * frame["emotional_intensity"] + 0.20 * impact_magnitude
     )
     fake_bonus = np.where(frame["is_fake"].to_numpy(dtype=bool), 0.04, -0.02)
 
@@ -606,6 +727,93 @@ def _extract_scenario_metrics(avg_timeline: pd.DataFrame, scenario: str) -> Dict
     }
 
 
+def _bootstrap_mean_interval(
+    values: List[float],
+    rng: np.random.Generator,
+    n_boot: int = 2000,
+) -> Dict[str, float]:
+    array = np.asarray(values, dtype=float)
+    if array.size == 0:
+        return {"mean": 0.0, "ci_low": 0.0, "ci_high": 0.0, "n": 0}
+    if array.size == 1:
+        only = float(array[0])
+        return {"mean": only, "ci_low": only, "ci_high": only, "n": 1}
+
+    boot = np.empty(n_boot, dtype=float)
+    for idx in range(n_boot):
+        sample = rng.choice(array, size=array.size, replace=True)
+        boot[idx] = float(np.mean(sample))
+
+    return {
+        "mean": float(np.mean(array)),
+        "ci_low": float(np.quantile(boot, 0.025)),
+        "ci_high": float(np.quantile(boot, 0.975)),
+        "n": int(array.size),
+    }
+
+
+def _summarize_run_metric_intervals(
+    metrics_df: pd.DataFrame,
+    seed: int,
+) -> Dict[str, Dict[str, Dict[str, float]]]:
+    summary: Dict[str, Dict[str, Dict[str, float]]] = {}
+    metric_names = ["peak_infected", "tick_of_peak", "infected_auc", "final_infected"]
+
+    for scenario in sorted(metrics_df["scenario"].unique().tolist()):
+        scenario_df = metrics_df[metrics_df["scenario"] == scenario]
+        scenario_rng = np.random.default_rng(seed + len(summary) + 1)
+        summary[scenario] = {}
+        for metric_name in metric_names:
+            values = scenario_df[metric_name].astype(float).tolist()
+            summary[scenario][metric_name] = _bootstrap_mean_interval(values, rng=scenario_rng)
+
+    return summary
+
+
+def _summarize_paired_run_deltas(
+    metrics_df: pd.DataFrame,
+    seed: int,
+) -> Dict[str, Dict[str, float]]:
+    pivot = metrics_df.pivot(index="run", columns="scenario")
+    if not isinstance(pivot.columns, pd.MultiIndex):
+        return {}
+
+    scenario_labels = set(pivot.columns.get_level_values(-1).tolist())
+    if "baseline" not in scenario_labels or "prebunk_hubs" not in scenario_labels:
+        return {}
+
+    baseline_cols = pivot.xs("baseline", axis=1, level="scenario")
+    prebunk_cols = pivot.xs("prebunk_hubs", axis=1, level="scenario")
+
+    paired = pd.DataFrame(
+        {
+            "peak_infected_delta": baseline_cols["peak_infected"] - prebunk_cols["peak_infected"],
+            "infected_auc_delta": baseline_cols["infected_auc"] - prebunk_cols["infected_auc"],
+            "final_infected_delta": baseline_cols["final_infected"] - prebunk_cols["final_infected"],
+            "tick_of_peak_delay": prebunk_cols["tick_of_peak"] - baseline_cols["tick_of_peak"],
+        }
+    ).dropna()
+
+    if paired.empty:
+        return {}
+
+    rng = np.random.default_rng(seed + 10_000)
+    summary: Dict[str, Dict[str, float]] = {}
+
+    for metric_name in paired.columns.tolist():
+        values = paired[metric_name].astype(float).tolist()
+        interval = _bootstrap_mean_interval(values, rng=rng)
+        positive_probability = float(np.mean(np.asarray(values, dtype=float) > 0.0))
+        non_negative_probability = float(np.mean(np.asarray(values, dtype=float) >= 0.0))
+        summary[metric_name] = {
+            **interval,
+            "positive_share": positive_probability,
+            "non_negative_share": non_negative_probability,
+        }
+
+    return summary
+
+
 def run_phase45_pipeline(
     news_df: pd.DataFrame,
     config: SimulationConfig,
@@ -678,6 +886,17 @@ def run_phase45_pipeline(
             snapshot_state = baseline_state.copy()
 
     timeline = pd.concat(all_runs, ignore_index=True)
+    run_metrics_rows: List[Dict[str, Any]] = []
+    for (scenario, run_id), run_df in timeline.groupby(["scenario", "run"]):
+        metrics = _extract_scenario_metrics(run_df, scenario=str(scenario))
+        run_metrics_rows.append(
+            {
+                "scenario": str(scenario),
+                "run": int(run_id),
+                **metrics,
+            }
+        )
+    run_metrics = pd.DataFrame(run_metrics_rows).sort_values(["scenario", "run"]).reset_index(drop=True)
 
     avg_timeline = (
         timeline.groupby(["scenario", "tick"], as_index=False)
@@ -687,6 +906,8 @@ def run_phase45_pipeline(
 
     baseline_metrics = _extract_scenario_metrics(avg_timeline, "baseline")
     prebunk_metrics = _extract_scenario_metrics(avg_timeline, "prebunk_hubs")
+    run_metric_intervals = _summarize_run_metric_intervals(run_metrics, seed=config.random_seed)
+    paired_run_deltas = _summarize_paired_run_deltas(run_metrics, seed=config.random_seed)
 
     reduction_peak = 0.0
     if baseline_metrics["peak_infected"] > 0:
@@ -705,9 +926,11 @@ def run_phase45_pipeline(
         "selected_news_source": chosen_news.get("source", ""),
         "selected_news_fake_label": bool(chosen_news.get("is_fake", False)),
         "selected_news_channel": chosen_news.get("seed_channel", ""),
+        "selected_news_feature_source": chosen_news.get("feature_source", "unknown"),
         "selected_news_metrics": {
             "controversy_score": float(chosen_news.get("controversy_score", 0.0)),
             "emotional_intensity": float(chosen_news.get("emotional_intensity", 0.0)),
+            "impact_score": float(chosen_news.get("impact_score", 0.0)),
             "transmission_probability": float(chosen_news.get("transmission_probability", 0.0)),
         },
         "baseline": baseline_metrics,
@@ -716,6 +939,8 @@ def run_phase45_pipeline(
             "peak_infected_percent": float(reduction_peak),
             "infected_auc_percent": float(reduction_auc),
         },
+        "run_metric_intervals": run_metric_intervals,
+        "paired_run_deltas": paired_run_deltas,
         "simulation_config": {
             "num_agents": int(snapshot_graph.number_of_nodes()) if snapshot_graph is not None else config.num_agents,
             "attach_edges": config.attach_edges,
@@ -732,6 +957,7 @@ def run_phase45_pipeline(
     return {
         "selected_news": chosen_news,
         "timeline": timeline,
+        "run_metrics": run_metrics,
         "average_timeline": avg_timeline,
         "hub_nodes": pd.DataFrame(hub_rows),
         "summary": summary,

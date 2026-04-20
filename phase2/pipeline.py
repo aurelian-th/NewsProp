@@ -662,7 +662,9 @@ def parse_args() -> argparse.Namespace:
     )
     default_telegram = resolve_existing_path(
         [
+            root / "scraper" / "telegram" / "moldova_news_telegram.json",
             root / "scraper" / "telegram" / "moldova_news_50.json",
+            root / "moldova_news_telegram.json",
             root / "moldova_news_50.json",
         ]
     )
