@@ -49,22 +49,63 @@ except Exception as e:
     dataset = pd.DataFrame()
 
 if not dataset.empty:
-    # Sidebar
-    st.sidebar.header("Simulation Settings")
+    st.sidebar.header("Mode Selection")
+    mode = st.sidebar.radio("Input Mode", ["Scraped Data", "Custom Article"])
     
-    search_query = st.sidebar.text_input("Search Headline", "")
+    if mode == "Scraped Data":
+        st.sidebar.subheader("Filter Existing Data")
+        type_filter = st.sidebar.radio("Show", ["All", "Fake Only", "Real Only"], horizontal=True)
+        search_query = st.sidebar.text_input("Search Headline", "")
+        
+        matches = dataset.copy()
+        if type_filter == "Fake Only":
+            matches = matches[matches["is_fake"] == True]
+        elif type_filter == "Real Only":
+            matches = matches[matches["is_fake"] == False]
+            
+        if search_query:
+            matches = matches[matches["headline"].str.contains(search_query, case=False, na=False)]
+
+        if matches.empty:
+            st.warning("No articles found matching filters.")
+            st.stop()
+
+        article_idx = st.sidebar.selectbox(
+            "Select Article to Simulate", 
+            matches.index, 
+            format_func=lambda x: f"{matches.loc[x, 'headline'][:60]}... ({'Fake' if matches.loc[x, 'is_fake'] else 'Real'})"
+        )
+        article = matches.loc[article_idx].to_dict()
     
-    if search_query:
-        matches = dataset[dataset["headline"].str.contains(search_query, case=False, na=False)]
-    else:
-        matches = dataset
-
-    if matches.empty:
-        st.warning("No articles found.")
-        st.stop()
-
-    article_idx = st.sidebar.selectbox("Select Article to Simulate", matches.index, format_func=lambda x: f"{matches.loc[x, 'headline'][:60]}... ({'Fake' if matches.loc[x, 'is_fake'] else 'Real'})")
-    article = matches.loc[article_idx]
+    else:  # Custom Article
+        st.sidebar.subheader("Custom Article Details")
+        st.info("We will use NLP and dataset medians to estimate the emotional score and transmission rate of your custom text.")
+        custom_title = st.text_input("Custom Headline", "BREAKING: Artificial intelligence takes over the simulation!")
+        custom_desc = st.text_area("Article Content (Used for Sentiment Analysis)", "Scientists report that the new models are spreading faster than anything seen before...")
+        is_fake = st.checkbox("Simulate as Fake News?", value=True)
+        
+        if not custom_title:
+            st.warning("Enter a custom headline to proceed.")
+            st.stop()
+            
+        custom_df = pd.DataFrame([{
+            "headline": custom_title,
+            "combined_text": f"{custom_title} {custom_desc}",
+            "is_fake": is_fake,
+            "source": "Custom User Input",
+            "source_type": "fake" if is_fake else "real",
+            "views": dataset["views"].median(),
+            "likes": dataset["likes"].median(),
+            "shares": dataset["shares"].median(),
+            "comments": dataset["comments"].median(),
+            "top_comment_count": dataset["top_comment_count"].median(),
+            "has_debunk_context": not is_fake
+        }])
+        
+        # Live compute the variables for the newly entered text
+        with st.spinner("Analyzing custom text emotions via VADER..."):
+            featured_custom = compute_news_features(custom_df)
+        article = featured_custom.iloc[0].to_dict()
 
     st.sidebar.subheader("Network Settings")
     use_synthetic = st.sidebar.checkbox("Use Built-in BA Network (Ignore Phase 3)", value=True)
@@ -133,6 +174,17 @@ if not dataset.empty:
             nx.draw_networkx_edges(app_graph, pos, alpha=0.1, ax=ax_net)
             ax_net.axis("off")
             st.pyplot(fig_net)
+
+            st.info("""
+            **What does this map show?**
+            - **Nodes (Dots):** Each dot represents a person (agent) in the simulated Moldovan social network. 
+            - **Edges (Lines):** The connections represent who follows or interacts with whom (social ties).
+            - **Colors (SEIZ Model):** 
+                - 🩶 **Gray (Susceptible):** Has not seen the news yet.
+                - 🟧 **Orange (Exposed):** Saw the news, currently deciding whether to trust it.
+                - 🟥 **Red (Infected):** Believed the news and is actively spreading/sharing it.
+                - 🟩 **Green (Skeptic):** Disbelieved the news or fact-checked it, stopping the spread (acting as a firewall).
+            """)
 
 st.markdown("---")
 st.markdown("*NewsProp Simulator - Final Phase Deliverable*")
