@@ -310,3 +310,15 @@
   - status: success
 - Purpose:
   - keep the manuscript synchronized with the newest evidence chain from Phase 2 through Phase 4/5
+
+### Recovery Branch Checkpoint After Translation Comparison
+- Timestamp:
+  - `2026-04-20 16:40 Europe/Chisinau`
+- Commit:
+  - `d77196a` - `Add sampled translation comparison`
+- Branch:
+  - `autonomous/newsprop-recovery`
+- Verification:
+  - `git push` succeeded and updated the remote branch on GitHub
+- Purpose:
+  - preserve the sampled translation comparison, the deterministic sample input, and the updated manuscript language in a remote checkpoint

@@ -87,12 +87,13 @@ Deliver a fully functional Moldova-focused misinformation propagation simulator 
 - Ran the matching translation-disabled Phase 2 pass on the same sampled corpus and completed successfully in 23 seconds.
 - Ran Phase 4/5 on the translation-enabled sample and the matching translation-disabled sample using the same 200-node smoke network.
 - Updated the paper draft with the translation comparison and rebuilt the PDF successfully.
+- Committed the sampled translation comparison as `d77196a` and pushed it to `origin/autonomous/newsprop-recovery`.
 
 ## Current Intent
-Checkpoint the translation-comparison update on the recovery branch, then decide whether a larger translation slice is worth the runtime cost.
+Do a final manuscript coherence pass with the new translation-comparison evidence and only expand the translation slice further if the paper still needs stronger statistics.
 
 ## Next Intent
-Either expand the translation slice slightly for stronger evidence or keep the current sample-level diagnostic and move to final paper tightening.
+Finish the paper narrative, figures, and references around the current evidence chain, then decide whether any last experiment is scientifically worth the runtime cost.
 
 ## Risks and Pivots
 - Python 3.14 compatibility remains a risk for less common scientific dependencies, even though the current stack installed successfully.
