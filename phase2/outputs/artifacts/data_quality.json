@@ -1,0 +1,18 @@
+{
+  "counters": {
+    "missing_headline": 1,
+    "short_text": 1,
+    "unknown_source": 104,
+    "unknown_source_domain": 394
+  },
+  "rejected_examples": [
+    {
+      "article_id": "4d98c925-dc4d-4bfc-89f8-11a4532352a3",
+      "flags": [
+        "short_text",
+        "unknown_source_domain"
+      ],
+      "source": "newsmakerlive"
+    }
+  ]
+}

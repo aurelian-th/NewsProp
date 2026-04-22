@@ -6,7 +6,7 @@ import calendar
 
 API_ENDPOINT = "https://stopfals.md/archive/filter"
 BASE_DOMAIN = "https://stopfals.md"
-TARGET_ARTICLES = 150
+TARGET_ARTICLES = 1000
 
 def get_previous_month(current_date):
     """Subtracts one month from the current date object."""
@@ -17,8 +17,8 @@ def get_previous_month(current_date):
 
 def scrape_until_target():
     articles_metadata = []
-    # Start at current month: March 2026
-    current_date = datetime.date(2026, 3, 1) 
+    # Start at current month: April 2026
+    current_date = datetime.date(2026, 4, 6) 
     
     print(f"Starting historical extraction. Target: {TARGET_ARTICLES} articles.")
     

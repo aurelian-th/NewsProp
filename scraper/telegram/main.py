@@ -32,6 +32,12 @@ from telethon import TelegramClient
 from telethon.tl.types import Message
 from tqdm import tqdm
 
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from scraper.common.schema import enforce_final_schema
+
 print(f"Python {sys.version}")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
