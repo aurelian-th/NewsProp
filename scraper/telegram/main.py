@@ -1,7 +1,7 @@
 """
 Moldova Telegram News Scraper
 ==============================
-Scrapes 50 posts (25 real + 25 fake) from verified Moldovan Telegram channels.
+Scrapes Telegram posts from Moldovan channels and balances fake/true classes.
 
 Requirements:
     pip install telethon python-dotenv tqdm
@@ -11,6 +11,9 @@ Setup:
         TG_API_ID=12345678
         TG_API_HASH=abcdef1234567890abcdef1234567890
         TG_PHONE=+37369000000
+        POSTS_PER_CHANNEL=120
+        TARGET_FAKE=200
+        TARGET_TRUE=200
 """
 
 import asyncio
@@ -48,10 +51,10 @@ API_ID       = int(os.getenv("TG_API_ID", "0"))
 API_HASH     = os.getenv("TG_API_HASH", "")
 PHONE        = os.getenv("TG_PHONE", "")
 SESSION_NAME = "moldova_scraper_session"
-POSTS_PER_CHANNEL = 30
-TARGET_FAKE  = 25
-TARGET_TRUE  = 25
-OUTPUT_FILE  = "moldova_news_50.json"
+POSTS_PER_CHANNEL = int(os.getenv("POSTS_PER_CHANNEL", "120"))
+TARGET_FAKE  = int(os.getenv("TARGET_FAKE", "200"))
+TARGET_TRUE  = int(os.getenv("TARGET_TRUE", "200"))
+OUTPUT_FILE  = os.path.join(os.path.dirname(__file__), "moldova_news_telegram.json")
 
 # ---------------------------------------------------------------------------
 # Verified channel list  (checked March 2026)
@@ -60,7 +63,7 @@ OUTPUT_FILE  = "moldova_news_50.json"
 CHANNELS = [
     # ── CREDIBLE ────────────────────────────────────────────────────────────
     {
-        "handle": "JurnalTV",           # https://t.me/JurnalTV
+        "handle": "Jurnal_TV",           # https://t.me/JurnalTV
         "name": "Jurnal TV",
         "is_propaganda": False,
     },
@@ -80,13 +83,33 @@ CHANNELS = [
         "is_propaganda": False,
     },
     {
-        "handle": "moldovanews",        # https://t.me/moldovanews
-        "name": "Moldova News",
+        "handle": "agoramd",           # https://t.me/agora_md
+        "name": "Agora.md",
         "is_propaganda": False,
     },
     {
-        "handle": "agora_md",           # https://t.me/agora_md
-        "name": "Agora.md",
+        "handle": "protvchisinauofficial",      # https://t.me/protvchisinau
+        "name": "PRO TV Chisinau",
+        "is_propaganda": False,
+    },
+    {
+        "handle": "unimedia_info",           # https://t.me/unimedia
+        "name": "UNIMEDIA",
+        "is_propaganda": False,
+    },
+    {
+        "handle": "realitateamd",      # https://t.me/realitatea_md
+        "name": "Realitatea",
+        "is_propaganda": False,
+    },
+    {
+        "handle": "deschide_md",        # https://t.me/deschide_md
+        "name": "Deschide.MD",
+        "is_propaganda": False,
+    },
+    {
+        "handle": "radiomoldova",       # https://t.me/radiomoldova
+        "name": "Radio Moldova",
         "is_propaganda": False,
     },
     # ── PROPAGANDA / PRO-RUSSIAN ────────────────────────────────────────────
@@ -102,13 +125,23 @@ CHANNELS = [
         "is_propaganda": True,
     },
     {
-        "handle": "prime_moldova",      # https://t.me/prime_moldova
-        "name": "Prime Moldova",
+        "handle": "gagauzinfo",         # https://t.me/gagauzinfo
+        "name": "Gagauz Info",
         "is_propaganda": True,
     },
     {
-        "handle": "gagauzinfo",         # https://t.me/gagauzinfo
-        "name": "Gagauz Info",
+        "handle": "canal5_md",           # https://t.me/canal5md
+        "name": "Canal 5",
+        "is_propaganda": True,
+    },
+    {
+        "handle": "newsmd24",    # https://t.me/moldova24online
+        "name": "Moldova24",
+        "is_propaganda": True,
+    },
+    {
+        "handle": "rusputnikmd_2",        # https://t.me/rusputnikmd
+        "name": "Sputnik Moldova",
         "is_propaganda": True,
     },
 ]
@@ -128,6 +161,8 @@ CRED_PATTERNS = [
     r"\bpotrivit\b", r"\bconform\b", r"\bdeclarat\b", r"\bconfirmat\b",
     r"\bdate oficiale\b", r"\bguvernul\b", r"\bparlamentul\b",
 ]
+
+URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
 def classify(text: str, is_propaganda_source: bool) -> bool:
@@ -163,6 +198,58 @@ def get_engagement(msg: Message) -> Dict:
         "views": views, "likes": likes,
         "shares": forwards, "comments": replies,
         "reactions": reactions_map,
+    }
+
+
+def infer_sources(text: str) -> List[str]:
+    lowered = text.lower()
+    sources: List[str] = ["Telegram"]
+    source_rules = [
+        ("YouTube", ["youtube.com", "youtu.be", "youtube"]),
+        ("TikTok", ["tiktok.com", "tiktok"]),
+        ("Instagram", ["instagram.com", "instagram"]),
+        ("Facebook", ["facebook.com", "fb.com", "facebook"]),
+    ]
+
+    for source_name, hints in source_rules:
+        if any(hint in lowered for hint in hints):
+            sources.append(source_name)
+
+    # Keep insertion order and uniqueness
+    seen = set()
+    unique_sources: List[str] = []
+    for src in sources:
+        if src not in seen:
+            unique_sources.append(src)
+            seen.add(src)
+    return unique_sources
+
+
+def extract_media_and_links(text: str) -> Dict[str, Optional[List[str]]]:
+    image_links: List[str] = []
+    video_links: List[str] = []
+    external_links: List[str] = []
+
+    raw_links = [u.rstrip(")].,;!?\"'") for u in URL_RE.findall(text)]
+    for url in raw_links:
+        low = url.lower()
+        if re.search(r"\.(jpg|jpeg|png|gif|webp|bmp)(\?.*)?$", low):
+            image_links.append(url)
+            continue
+        if any(site in low for site in ["youtube.com", "youtu.be", "vimeo.com", "rutube", "tiktok.com"]):
+            video_links.append(url)
+            continue
+        external_links.append(url)
+
+    def uniq(values: List[str]) -> Optional[List[str]]:
+        if not values:
+            return None
+        return list(dict.fromkeys(values))
+
+    return {
+        "images": uniq(image_links),
+        "videos": uniq(video_links),
+        "external_links": uniq(external_links),
     }
 
 
@@ -205,7 +292,7 @@ async def scrape_channel(client: TelegramClient, cfg: Dict, limit: int) -> List[
             "source_name":        cfg["name"],
             "is_fake":            is_fake,
             "classification":     "heuristic+source_label",
-            "publication_date":   msg.date.astimezone(timezone.utc).isoformat(),
+            "publication_date":   msg.date.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
             "headline":           text.split("\n")[0][:200],
             "body_text":          text,
             "telegram_url":       f"https://t.me/{handle}/{msg.id}",
@@ -282,27 +369,36 @@ async def main() -> None:
     true_raw = sum(1 for r in all_records if not r["is_fake"])
     log.info(f"Raw total: {len(all_records)} posts  (fake={fake_raw}, true={true_raw})")
 
-    final = balance(all_records, TARGET_FAKE, TARGET_TRUE)
+    if len(all_records) > (TARGET_FAKE + TARGET_TRUE):
+        log.info(
+            f"Keeping all {len(all_records)} scraped posts (above target {TARGET_FAKE + TARGET_TRUE})"
+        )
+    final = all_records
 
     output = []
     for r in final:
-        raw = {
+        media_and_links = extract_media_and_links(r["body_text"])
+        inferred_sources = infer_sources(r["body_text"])
+        output.append({
             "article_id":         r["article_id"],
             "source":             r["source"],
+            "source_domain":      "t.me",
             "is_fake":            r["is_fake"],
+            "topic_category":     None,
             "publication_date":   r["publication_date"],
             "headline":           r["headline"],
             "body_text":          r["body_text"],
-            "engagement_metrics": r["engagement_metrics"],
+            "metrics": {
+                "views": r["engagement_metrics"].get("views", 0),
+                "likes": r["engagement_metrics"].get("likes", 0),
+                "forwards_or_shares": r["engagement_metrics"].get("shares", 0),
+                "comments": r["engagement_metrics"].get("comments", 0),
+            },
             "top_comments":       r["top_comments"],
             "debunk_context":     r["debunk_context"],
-            "_meta": {
-                "source_name":    r["source_name"],
-                "classification": r["classification"],
-                "telegram_url":   r["telegram_url"],
-            },
-        }
-        output.append(enforce_final_schema(raw, default_source=r["source"]))
+            "inferred_sources":   inferred_sources if inferred_sources else None,
+            "media_and_links":    media_and_links if any(v is not None for v in media_and_links.values()) else None,
+        })
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
